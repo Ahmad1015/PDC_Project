@@ -5,6 +5,23 @@ import threading
 import time
 from PIL import Image, ImageTk
 import os
+import sys
+import traceback
+
+# Add the path to your GPU scanner
+sys.path.append(os.path.join(os.path.dirname(__file__), 'GPU'))
+
+# Import your backend functions
+try:
+    from GPU.signature_loader import load_signatures
+    from GPU.gpu_scanner import gpu_malware_scan  # Your main scanning function
+    
+    # Load signatures once at startup
+    signatures = load_signatures("C:/Users/mahme/Downloads/extract/Backend/signatures.json")
+    print(f"Loaded {len(signatures)} signatures successfully")
+except Exception as e:
+    print(f"Error loading signatures: {e}")
+    signatures = []
 
 # Set the appearance mode and color theme
 ctk.set_appearance_mode("light")  # "light" or "dark"
@@ -24,6 +41,7 @@ class MalwareScannerApp:
         # Initialize variables
         self.selected_file = None
         self.scanning = False
+        self.scan_result = None
         
         # Create frames
         self.loading_frame = None
@@ -128,8 +146,6 @@ class MalwareScannerApp:
             text_color="#2B5CE6"
         )
         logo_text.pack(side="left", padx=(20, 0), pady=20)
-        
-
         
         # Main content area
         content_frame = ctk.CTkFrame(self.main_frame, fg_color="#F8F9FA", corner_radius=15)
@@ -237,8 +253,8 @@ class MalwareScannerApp:
         
         self.show_scanning_overlay()
         
-        # Start scanning in a separate thread to keep UI responsive
-        scan_thread = threading.Thread(target=self.simulate_scan)
+        # Start REAL scanning in a separate thread to keep UI responsive
+        scan_thread = threading.Thread(target=self.real_scan)
         scan_thread.daemon = True
         scan_thread.start()
     
@@ -330,42 +346,58 @@ class MalwareScannerApp:
             except:
                 pass
     
-
-    
-    def simulate_scan(self):
-        """Simulate the scanning process with progress updates"""
+    def real_scan(self):
+        """Perform actual GPU malware scanning"""
         self.scanning = True
+        self.scan_result = None
         
-        # Faster scanning with more frequent updates
-        for progress in range(0, 101, 2):  # Increment by 2 for faster progress
-            if not self.scanning:
-                break
-                
-            time.sleep(0.05)  # Much faster updates (50ms intervals)
+        try:
+            # Update UI with initial status
+            self.root.after(0, lambda: self.update_scan_progress(5, "Preparing scan..."))
             
-            # Update status based on progress
-            if progress < 20:
-                status = "Analyzing file signature..."
-            elif progress < 40:
-                status = "Checking against malware database..."
-            elif progress < 60:
-                status = "Deep signature analysis..."
-            elif progress < 80:
-                status = "Behavioral pattern detection..."
-            elif progress < 95:
-                status = "Cross-referencing threat intelligence..."
-            else:
-                status = "Finalizing security assessment..."
+            # Check if file exists
+            if not os.path.exists(self.selected_file):
+                raise FileNotFoundError(f"File not found: {self.selected_file}")
             
-            try:
-                self.root.after(0, lambda p=progress, s=status: self.update_scan_progress(p, s))
-            except:
-                break
-        
-        # Final completion
-        if self.scanning:
+            self.root.after(0, lambda: self.update_scan_progress(10, "Initializing GPU scanner..."))
+            
+            # Check if signatures are loaded
+            if not signatures:
+                raise ValueError("No signatures loaded")
+            
+            self.root.after(0, lambda: self.update_scan_progress(20, "Starting GPU scan..."))
+            
+            # Call your actual GPU scanner
+            result = gpu_malware_scan(self.selected_file, signatures)
+            
+            # Update progress during scan
+            self.root.after(0, lambda: self.update_scan_progress(90, "Finalizing results..."))
+            
+            # Store the result
+            self.scan_result = result
+            
             self.root.after(0, lambda: self.update_scan_progress(100, "Scan complete!"))
             time.sleep(0.5)
+            
+        except Exception as e:
+            print(f"Scan error: {e}")
+            traceback.print_exc()
+            
+            # Create an error result
+            self.scan_result = {
+                'is_infected': False,
+                'matches_found': 0,
+                'error': str(e),
+                'status': 'ERROR',
+                'file_path': self.selected_file,
+                'threat_names': [],
+                'scan_time': 0
+            }
+            
+            self.root.after(0, lambda: self.update_scan_progress(100, f"Error: {str(e)}"))
+            time.sleep(1)
+        
+        finally:
             self.scanning = False
             self.root.after(0, self.show_scan_results)
     
@@ -406,24 +438,57 @@ class MalwareScannerApp:
         center_results = ctk.CTkFrame(results_container, fg_color="#F8F9FA")
         center_results.pack(expand=True)
         
-        # Simulate scan result (you'll replace this with your backend logic)
-        import random
-        threats_found = random.choice([0, 1, 2, 3])  # Random for demo
-        
-        if threats_found == 0:
-            # Clean file
-            result_icon = "✅"
-            result_color = "#10B981"
-            result_title = "File is Clean"
-            result_message = "No threats detected in the scanned file"
-            bg_color = "#ECFDF5"
+        # Get real scan results
+        if hasattr(self, 'scan_result') and self.scan_result:
+            result = self.scan_result
+            
+            # Handle error case
+            if 'error' in result:
+                result_icon = "❌"
+                result_color = "#EF4444"
+                result_title = "Scan Error"
+                result_message = f"Error during scan: {result['error']}"
+                bg_color = "#FEF2F2"
+            elif result['is_infected']:
+                # Threats found
+                threats_count = result['matches_found']
+                result_icon = "⚠️"
+                result_color = "#EF4444"
+                result_title = f"{threats_count} Threat{'s' if threats_count > 1 else ''} Found"
+                
+                # Show threat names if available
+                threat_list = result.get('matched_signatures', [])
+                if threat_list:
+                    # Extract threat names from (name, count) tuples
+                    threat_names = [name for name, count in threat_list]
+                    threat_display = ', '.join(threat_names[:3])  # Show first 3 threats
+                    if len(threat_names) > 3:
+                        threat_display += f" (+{len(threat_names)-3} more)"
+                    result_message = f"Detected: {threat_display}"
+                else:
+                    result_message = f"Detected {threats_count} potential threat{'s' if threats_count > 1 else ''}"
+                
+                bg_color = "#FEF2F2"
+            else:
+                # Clean file
+                result_icon = "✅"
+                result_color = "#10B981"
+                result_title = "File is Clean"
+                result_message = "No threats detected in the scanned file"
+                bg_color = "#ECFDF5"
+                
+            # Display scan time if available
+            scan_time = result.get('scan_time', 0)
+            scan_info = f"Scan completed in {scan_time:.2f}s" if scan_time > 0 else "Scan completed"
+            
         else:
-            # Threats found
-            result_icon = "⚠️"
-            result_color = "#EF4444"
-            result_title = f"{threats_found} Threat{'s' if threats_found > 1 else ''} Found"
-            result_message = f"Detected {threats_found} potential threat{'s' if threats_found > 1 else ''} in the file"
-            bg_color = "#FEF2F2"
+            # Fallback if no result
+            result_icon = "❓"
+            result_color = "#6B7280"
+            result_title = "Unknown Result"
+            result_message = "Scan completed but no results available"
+            bg_color = "#F3F4F6"
+            scan_info = "Scan completed"
         
         # Result card
         result_card = ctk.CTkFrame(
@@ -470,7 +535,21 @@ class MalwareScannerApp:
             font=ctk.CTkFont(size=14),
             text_color="#6B7280"
         )
-        file_info.pack(pady=(0, 30))
+        file_info.pack(pady=(0, 5))
+        
+        # Scan performance info
+        if hasattr(self, 'scan_result') and self.scan_result and 'scan_time' in self.scan_result:
+            scan_stats = ctk.CTkLabel(
+                result_card,
+                text=f"Scan time: {self.scan_result['scan_time']:.2f}s | Signatures checked: {self.scan_result.get('signatures_checked', 'N/A'):,}",
+                font=ctk.CTkFont(size=12),
+                text_color="#6B7280"
+            )
+            scan_stats.pack(pady=(5, 25))
+        else:
+            # Just add some spacing
+            spacing = ctk.CTkLabel(result_card, text="", height=20)
+            spacing.pack()
         
         # Scan Again button
         scan_again_btn = ctk.CTkButton(
@@ -501,9 +580,8 @@ class MalwareScannerApp:
             self.results_frame.destroy()
         self.selected_file = None
         self.scanning = False
+        self.scan_result = None
         self.show_main_menu()
-    
-
     
     def run(self):
         """Start the application"""

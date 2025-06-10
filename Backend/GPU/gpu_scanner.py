@@ -266,15 +266,17 @@ def gpu_malware_scan(file_path, signatures_data, max_signatures=None):
     
     # Return results for programmatic use
     return {
-        'file_path': file_path,
-        'file_size': file_len,
-        'signatures_checked': len(valid_patterns),
-        'matches_found': matches_found,
-        'total_occurrences': total_occurrences,
-        'matched_signatures': matched_signatures,
-        'scan_time': total_time,
-        'kernel_time': kernel_time,
-        'is_infected': matches_found > 0
+    'file_path': file_path,
+    'file_size': file_len,
+    'signatures_checked': len(valid_patterns),
+    'matches_found': matches_found,
+    'total_occurrences': total_occurrences,
+    'matched_signatures': matched_signatures,  # List of (name, count) tuples
+    'scan_time': total_time,
+    'kernel_time': kernel_time,
+    'is_infected': matches_found > 0,
+    'status': 'INFECTED' if matches_found > 0 else 'CLEAN',
+    'threat_names': [sig_name for sig_name, count in matched_signatures]  # Just names for UI
     }
 
 # Simple usage examples
