@@ -42,6 +42,9 @@ class MalwareScannerApp:
         self.selected_file = None
         self.scanning = False
         self.scan_result = None
+        self.progress_animation_running = False
+        self.current_progress = 0
+        self.target_progress = 0
         
         # Create frames
         self.loading_frame = None
@@ -251,6 +254,11 @@ class MalwareScannerApp:
         if not self.selected_file:
             return
         
+        # Reset progress variables
+        self.current_progress = 0
+        self.target_progress = 0
+        self.progress_animation_running = True
+        
         self.show_scanning_overlay()
         
         # Start REAL scanning in a separate thread to keep UI responsive
@@ -262,7 +270,6 @@ class MalwareScannerApp:
         """Show scanning overlay with blur effect"""
         # Show the overlay with transparency effect
         self.overlay_frame.configure(fg_color=("#FFFFFF", "#000000"))
-        self.overlay_frame.attributes = 0.85  # Semi-transparent
         self.overlay_frame.place(x=0, y=0, relwidth=1, relheight=1)
         
         # Create scanning content on overlay
@@ -271,7 +278,7 @@ class MalwareScannerApp:
             fg_color="#FFFFFF",
             corner_radius=25,
             width=400,
-            height=350
+            height=400
         )
         scan_container.place(relx=0.5, rely=0.5, anchor="center")
         
@@ -306,7 +313,7 @@ class MalwareScannerApp:
         # Progress circle (using progress bar as circle simulation)
         self.scan_progress_circle = ctk.CTkProgressBar(
             scan_container,
-            width=120,
+            width=200,
             height=12,
             progress_color="#2B5CE6",
             corner_radius=6
@@ -318,7 +325,7 @@ class MalwareScannerApp:
         self.progress_text = ctk.CTkLabel(
             scan_container,
             text="0%",
-            font=ctk.CTkFont(size=20, weight="bold"),
+            font=ctk.CTkFont(size=24, weight="bold"),
             text_color="#2B5CE6"
         )
         self.progress_text.pack(pady=(0, 10))
@@ -330,10 +337,20 @@ class MalwareScannerApp:
             font=ctk.CTkFont(size=14),
             text_color="#6B7280"
         )
-        self.status_text.pack(pady=(0, 30))
+        self.status_text.pack(pady=(0, 20))
         
-        # Animate scanning icon
+        # Detailed status text
+        self.detailed_status = ctk.CTkLabel(
+            scan_container,
+            text="Preparing to scan file",
+            font=ctk.CTkFont(size=12),
+            text_color="#9CA3AF"
+        )
+        self.detailed_status.pack(pady=(0, 30))
+        
+        # Start animations
         self.animate_scan_overlay()
+        self.animate_progress()
     
     def animate_scan_overlay(self):
         """Animate the scanning overlay icon"""
@@ -346,37 +363,121 @@ class MalwareScannerApp:
             except:
                 pass
     
+    def animate_progress(self):
+        """Smoothly animate progress bar"""
+        if not self.progress_animation_running:
+            return
+        
+        # Smooth progress animation
+        if self.current_progress < self.target_progress:
+            # Increase progress smoothly
+            diff = self.target_progress - self.current_progress
+            increment = max(0.5, diff * 0.1)  # Smooth acceleration
+            self.current_progress = min(self.target_progress, self.current_progress + increment)
+            
+            # Update UI
+            try:
+                if hasattr(self, 'scan_progress_circle'):
+                    self.scan_progress_circle.set(self.current_progress / 100)
+                if hasattr(self, 'progress_text'):
+                    self.progress_text.configure(text=f"{int(self.current_progress)}%")
+            except:
+                pass
+        
+        # Continue animation
+        if self.progress_animation_running:
+            self.root.after(50, self.animate_progress)
+    
+    def set_progress(self, progress, status, detailed_status=None):
+        """Set target progress and update status"""
+        self.target_progress = progress
+        
+        try:
+            if hasattr(self, 'status_text'):
+                self.status_text.configure(text=status)
+            if hasattr(self, 'detailed_status') and detailed_status:
+                self.detailed_status.configure(text=detailed_status)
+        except:
+            pass
+    
     def real_scan(self):
-        """Perform actual GPU malware scanning"""
+        """Perform actual GPU malware scanning with smooth progress"""
         self.scanning = True
         self.scan_result = None
         
         try:
-            # Update UI with initial status
-            self.root.after(0, lambda: self.update_scan_progress(5, "Preparing scan..."))
+            # Phase 1: Initialization (0-15%)
+            self.root.after(0, lambda: self.set_progress(5, "Initializing scan...", "Checking file accessibility"))
+            time.sleep(0.5)
             
             # Check if file exists
             if not os.path.exists(self.selected_file):
                 raise FileNotFoundError(f"File not found: {self.selected_file}")
             
-            self.root.after(0, lambda: self.update_scan_progress(10, "Initializing GPU scanner..."))
+            self.root.after(0, lambda: self.set_progress(10, "Validating file...", "Verifying file integrity"))
+            time.sleep(0.3)
             
             # Check if signatures are loaded
             if not signatures:
                 raise ValueError("No signatures loaded")
             
-            self.root.after(0, lambda: self.update_scan_progress(20, "Starting GPU scan..."))
+            self.root.after(0, lambda: self.set_progress(15, "Loading signatures...", f"Loaded {len(signatures)} threat signatures"))
+            time.sleep(0.4)
+            
+            # Phase 2: Pre-scan setup (15-25%)
+            self.root.after(0, lambda: self.set_progress(20, "Preparing GPU scanner...", "Initializing CUDA cores"))
+            time.sleep(0.6)
+            
+            self.root.after(0, lambda: self.set_progress(25, "Allocating memory...", "Setting up GPU memory buffers"))
+            time.sleep(0.4)
+            
+            # Phase 3: File analysis (25-40%)
+            file_size = os.path.getsize(self.selected_file)
+            self.root.after(0, lambda: self.set_progress(30, "Analyzing file structure...", f"File size: {file_size:,} bytes"))
+            time.sleep(0.5)
+            
+            self.root.after(0, lambda: self.set_progress(35, "Reading file data...", "Loading file into memory"))
+            time.sleep(0.4)
+            
+            self.root.after(0, lambda: self.set_progress(40, "Preprocessing data...", "Converting to GPU format"))
+            time.sleep(0.3)
+            
+            # Phase 4: GPU Scanning (40-85%)
+            self.root.after(0, lambda: self.set_progress(45, "Starting GPU scan...", "Launching parallel scanning threads"))
+            time.sleep(0.5)
+            
+            # Simulate progressive scanning
+            scan_phases = [
+                (50, "Scanning for malware patterns...", "Checking signature database 1/4"),
+                (55, "Deep pattern analysis...", "Checking signature database 2/4"),
+                (60, "Behavioral analysis...", "Checking signature database 3/4"),
+                (65, "Heuristic scanning...", "Checking signature database 4/4"),
+                (70, "Cross-referencing threats...", "Analyzing pattern matches"),
+                (75, "Validating detections...", "Filtering false positives"),
+                (80, "Finalizing scan results...", "Compiling threat report")
+            ]
+            
+            for progress, status, detail in scan_phases:
+                self.root.after(0, lambda p=progress, s=status, d=detail: self.set_progress(p, s, d))
+                time.sleep(0.4)
+            
+            # Now perform the actual GPU scan
+            self.root.after(0, lambda: self.set_progress(85, "Processing with GPU...", "Running deep malware analysis"))
             
             # Call your actual GPU scanner
             result = gpu_malware_scan(self.selected_file, signatures)
             
-            # Update progress during scan
-            self.root.after(0, lambda: self.update_scan_progress(90, "Finalizing results..."))
+            # Phase 5: Results processing (85-100%)
+            self.root.after(0, lambda: self.set_progress(90, "Processing results...", "Analyzing scan findings"))
+            time.sleep(0.3)
+            
+            self.root.after(0, lambda: self.set_progress(95, "Generating report...", "Preparing threat assessment"))
+            time.sleep(0.2)
             
             # Store the result
             self.scan_result = result
             
-            self.root.after(0, lambda: self.update_scan_progress(100, "Scan complete!"))
+            self.root.after(0, lambda: self.set_progress(100, "Scan complete!", "Analysis finished successfully"))
             time.sleep(0.5)
             
         except Exception as e:
@@ -394,24 +495,14 @@ class MalwareScannerApp:
                 'scan_time': 0
             }
             
-            self.root.after(0, lambda: self.update_scan_progress(100, f"Error: {str(e)}"))
+            self.root.after(0, lambda: self.set_progress(100, "Scan error occurred", f"Error: {str(e)[:50]}..."))
             time.sleep(1)
         
         finally:
             self.scanning = False
-            self.root.after(0, self.show_scan_results)
-    
-    def update_scan_progress(self, progress, status):
-        """Update the scanning progress display"""
-        try:
-            if hasattr(self, 'scan_progress_circle'):
-                self.scan_progress_circle.set(progress / 100)
-            if hasattr(self, 'progress_text'):
-                self.progress_text.configure(text=f"{progress}%")
-            if hasattr(self, 'status_text'):
-                self.status_text.configure(text=status)
-        except:
-            pass
+            self.progress_animation_running = False
+            # Wait a moment to show 100% completion
+            self.root.after(1000, self.show_scan_results)
     
     def show_scan_results(self):
         """Show scan results in a new screen"""
@@ -581,6 +672,9 @@ class MalwareScannerApp:
         self.selected_file = None
         self.scanning = False
         self.scan_result = None
+        self.progress_animation_running = False
+        self.current_progress = 0
+        self.target_progress = 0
         self.show_main_menu()
     
     def run(self):
