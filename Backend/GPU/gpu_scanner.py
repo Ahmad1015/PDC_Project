@@ -81,19 +81,6 @@ def scan_file_with_gpu(file_path, loaded_signatures):
         pattern_array[i, :plen] = np.array(pattern, dtype=np.int32)
         pattern_lengths[i] = plen
 
-    # Debug: Check EICAR signature
-    eicar_index = None
-    for i, name in enumerate(sig_names):
-        if "EICAR" in name.upper():
-            eicar_index = i
-            break
-    if eicar_index is not None:
-        print("\n🔍 EICAR Signature Debug:")
-        print(f"Name: {sig_names[eicar_index]}")
-        print(f"Hex Pattern: {sigs[eicar_index]['pattern']}")
-        print(f"Parsed Bytes (hex): {[f'{x:02x}' for x in sig_patterns[eicar_index]]}")
-        print(f"File Bytes (hex): {file_bytes[:len(sig_patterns[eicar_index])].hex()}")
-        print(f"Pattern Length: {pattern_lengths[eicar_index]}")
 
     # Transfer data to GPU
     d_file_data = cuda.to_device(np.frombuffer(file_bytes, dtype=np.uint8))
