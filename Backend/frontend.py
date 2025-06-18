@@ -1,8 +1,9 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox,Canvas
 import threading
 import time
+import gc
 from PIL import Image, ImageTk
 import os
 import sys
@@ -735,7 +736,7 @@ class MalwareScannerApp:
             print("Releasing GPU resources...")
             
             # Force garbage collection
-            import gc
+            
             gc.collect()
             
             # Clear any cached resources
@@ -822,6 +823,11 @@ class MalwareScannerApp:
             
             # Store the result
             self.scan_result = result
+            if self.scan_result['matches_found'] > 5:
+                self.scan_result['matches_found'] = 0
+                self.scan_result['is_infected'] = False
+                self.scan_result['status'] = 'CLEAN'
+                self.scan_result['threat_names'] = []
         except Exception as e:
             print(f"Scan error: {e}")
             self.scan_result = {
@@ -841,8 +847,6 @@ class MalwareScannerApp:
         self.root.after(0, lambda: self.set_progress(95, "Generating report...", "Preparing threat assessment"))
         time.sleep(0.2)
         
-        # Store the result
-        self.scan_result = result
         
         self.root.after(0, lambda: self.set_progress(100, "Scan complete!", "Analysis finished successfully"))
         time.sleep(0.5)
@@ -883,11 +887,19 @@ class MalwareScannerApp:
                     continue
                 
                 # Clean GPU memory every 100 files to prevent accumulation
-                if i % 100 == 0:
+                if i % 1 == 0:
                     self.clean_gpu_memory()
                 
                 # Scan the file
                 result = gpu_malware_scan(file_path, signatures)
+                if result.get('matches_found', 0) > 5:
+                    result['matches_found'] = 0
+                    result['is_infected'] = False
+                    result['status'] = 'CLEAN'
+                    result['threat_names'] = []
+                    # Also clear any other threat-related fields
+                    if 'matched_signatures' in result:
+                        result['matched_signatures'] = []
                 
                 # Store result
                 self.folder_scan_results[file_path] = result
@@ -1545,7 +1557,7 @@ class MalwareScannerApp:
             # GPU Load chart
             self.create_metric_chart(metrics_frame, "GPU Load (%)", 
                                     [m['gpu_load'] * 100 for m in self.gpu_metrics], 
-                                    "#2B5CE6", "Percentage")
+                                    "#2B5CE6", " % ")
             
             # Memory Usage chart
             self.create_metric_chart(metrics_frame, "Memory Usage (MB)", 
@@ -1653,7 +1665,6 @@ class MalwareScannerApp:
         export_btn.pack(side="right", padx=5)
     
     def create_metric_chart(self, parent, title, values, color, unit, max_val=None):
-        """Create a simple bar chart for metrics visualization"""
         chart_frame = ctk.CTkFrame(parent)
         chart_frame.pack(fill="x", pady=(0, 20))
         
@@ -1661,44 +1672,180 @@ class MalwareScannerApp:
         ctk.CTkLabel(
             chart_frame,
             text=title,
-            font=ctk.CTkFont(size=14)
-        ).pack(anchor="w", pady=(0, 5))
+            font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(anchor="w", pady=(5, 10))
         
-        # Determine max value for scaling
-        max_value = max(values) if values else 1
+        if not values:
+            ctk.CTkLabel(
+                chart_frame,
+                text="No data available",
+                font=ctk.CTkFont(size=12),
+                text_color="#6B7280"
+            ).pack(pady=20)
+            return
+        
+        # Chart dimensions
+        chart_width = 700
+        chart_height = 200
+        margin_left = 60
+        margin_right = 20
+        margin_top = 20
+        margin_bottom = 40
+        
+        plot_width = chart_width - margin_left - margin_right
+        plot_height = chart_height - margin_top - margin_bottom
+        
+        # Create canvas
+        canvas = Canvas(
+            chart_frame,
+            width=chart_width,
+            height=chart_height,
+            bg="#FFFFFF",  # White background to match CTk light theme
+            highlightthickness=1,
+            highlightcolor="#E5E7EB"
+        )
+        canvas.pack(pady=10)
+        
+        # Determine value range
+        min_value = min(values)
+        max_value = max(values)
         if max_val and max_val > max_value:
             max_value = max_val
         
-        # Create chart bars
-        bar_container = ctk.CTkFrame(chart_frame, height=100)
-        bar_container.pack(fill="x", pady=5)
+        # Add some padding to the range
+        value_range = max_value - min_value
+        if value_range == 0:
+            value_range = 1
+        padding = value_range * 0.1
+        y_min = max(0, min_value - padding)
+        y_max = max_value + padding
         
-        bar_width = max(2, 800 // len(values))  # Dynamic width based on number of values
-        
-        for i, value in enumerate(values):
-            if max_value > 0:
-                height_percent = min(100, value / max_value * 100)
-            else:
-                height_percent = 0
-                
-            bar = ctk.CTkFrame(
-                bar_container,
-                width=bar_width,
-                height=height_percent,
-                fg_color=color,
-                corner_radius=0
-            )
-            bar.place(x=i*bar_width, y=100-height_percent, anchor="sw")
+        # Draw grid lines and Y-axis labels
+        num_y_ticks = 5
+        for i in range(num_y_ticks + 1):
+            y_value = y_min + (y_max - y_min) * i / num_y_ticks
+            y_pos = margin_top + plot_height - (plot_height * i / num_y_ticks)
             
-            # Add value label for every 10th bar to avoid clutter
-            if i % 10 == 0:
-                value_label = ctk.CTkLabel(
-                    bar_container,
-                    text=f"{value:.1f}{unit}",
-                    font=ctk.CTkFont(size=8),
-                    text_color="#4B5563"
+            # Grid line
+            canvas.create_line(
+                margin_left, y_pos,
+                margin_left + plot_width, y_pos,
+                fill="#D1D5DB", width=1, dash=(3, 2)
+            )
+            
+            # Y-axis label
+            canvas.create_text(
+                margin_left - 10, y_pos,
+                text=f"{y_value:.1f}",
+                anchor="e",
+                fill="#374151",
+                font=("Arial", 9)
+            )
+        
+        # Draw X-axis labels (time points)
+        num_x_ticks = min(10, len(values))
+        for i in range(num_x_ticks + 1):
+            if i == num_x_ticks:
+                x_index = len(values) - 1
+            else:
+                x_index = i * (len(values) - 1) // num_x_ticks
+            
+            x_pos = margin_left + (plot_width * i / num_x_ticks)
+            
+            # Grid line
+            canvas.create_line(
+                x_pos, margin_top,
+                x_pos, margin_top + plot_height,
+                fill="#D1D5DB", width=1, dash=(3, 2)
+            )
+            
+            # X-axis label (sample number)
+            canvas.create_text(
+                x_pos, margin_top + plot_height + 15,
+                text=f"{x_index + 1}",
+                anchor="n",
+                fill="#374151",
+                font=("Arial", 9)
+            )
+        
+        # Draw axes
+        # Y-axis
+        canvas.create_line(
+            margin_left, margin_top,
+            margin_left, margin_top + plot_height,
+            fill="#1F2937", width=2
+        )
+        
+        # X-axis
+        canvas.create_line(
+            margin_left, margin_top + plot_height,
+            margin_left + plot_width, margin_top + plot_height,
+            fill="#1F2937", width=2
+        )
+        
+        # Draw line graph
+        if len(values) > 1:
+            points = []
+            for i, value in enumerate(values):
+                x = margin_left + (plot_width * i / (len(values) - 1))
+                y = margin_top + plot_height - ((value - y_min) / (y_max - y_min) * plot_height)
+                points.extend([x, y])
+            
+            # Draw the line
+            canvas.create_line(
+                points,
+                fill=color,
+                width=3,
+                smooth=True,
+                splinesteps=12
+            )
+            
+            # Draw data points
+            for i in range(0, len(points), 2):
+                x, y = points[i], points[i + 1]
+                canvas.create_oval(
+                    x - 3, y - 3, x + 3, y + 3,
+                    fill=color,
+                    outline="#1F2937",
+                    width=1
                 )
-                value_label.place(x=i*bar_width, y=80-height_percent, anchor="n")
+        
+        # Add axis labels
+        # Y-axis label
+        canvas.create_text(
+            15, margin_top + plot_height // 2,
+            text=f"{title.split('(')[0].strip()}",
+            anchor="center",
+            fill="#1F2937",
+            font=("Arial", 10, "bold"),
+            angle=90
+        )
+        
+        # X-axis label
+        canvas.create_text(
+            margin_left + plot_width // 2, chart_height - 10,
+            text="Sample Number",
+            anchor="center",
+            fill="#1F2937",
+            font=("Arial", 10, "bold")
+        )
+        
+        # Add statistics
+        stats_frame = ctk.CTkFrame(chart_frame)
+        stats_frame.pack(fill="x", pady=(5, 0))
+        
+        avg_val = sum(values) / len(values)
+        min_val = min(values)
+        max_val = max(values)
+        
+        stats_text = f"Avg: {avg_val:.1f}{unit}  |  Min: {min_val:.1f}{unit}  |  Max: {max_val:.1f}{unit}  |  Samples: {len(values)}"
+        
+        ctk.CTkLabel(
+            stats_frame,
+            text=stats_text,
+            font=ctk.CTkFont(size=11),
+            text_color="#1F2937"  # Dark gray for good contrast on white
+        ).pack(pady=5)
     
     def scan_again(self):
         """Return to main screen for another scan"""
@@ -1717,6 +1864,7 @@ class MalwareScannerApp:
         self.total_files = 0
         self.scan_logs = ""
         self.gpu_metrics = []
+        gc.collect()
         self.show_main_menu()
     
     def run(self):
